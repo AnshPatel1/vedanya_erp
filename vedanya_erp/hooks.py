@@ -26,7 +26,7 @@ app_license = "bsl-1.0"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/vedanya_erp/css/vedanya_erp.css"
-# app_include_js = "/assets/vedanya_erp/js/vedanya_erp.js"
+app_include_js = "/assets/vedanya_erp/js/quick_entry.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/vedanya_erp/css/vedanya_erp.css"
@@ -43,7 +43,9 @@ app_license = "bsl-1.0"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+    "Batch": "controllers/batch/batch.js",
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -250,3 +252,20 @@ app_license = "bsl-1.0"
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
+
+fixtures = [
+    {
+        "dt": "Custom Field",
+        "filters": [
+            [
+                "name",
+                "in",
+                [
+                    "Address-custom_default_billing_branch",
+                    "Batch-custom_mfg_batch",
+                    "Batch-custom_show_stock_balances",
+                ],
+            ]
+        ],
+    },
+]
