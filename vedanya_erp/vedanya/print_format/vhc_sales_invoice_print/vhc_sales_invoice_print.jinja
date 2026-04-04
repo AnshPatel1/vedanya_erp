@@ -1,0 +1,862 @@
+{%- set company = frappe.get_doc("Company", doc.company) -%}
+{%- set company_addreses = frappe.db.sql("""
+SELECT a.address_line1, a.address_line2, a.city, a.state, a.pincode, a.country, a.gst_state_number, a.phone, a.email_id,
+a.gstin
+FROM `tabAddress` a
+JOIN `tabDynamic Link` dl ON dl.parent = a.name
+WHERE dl.link_doctype = 'Company'
+AND dl.link_name = %s
+AND dl.parenttype = 'Address'
+AND a.is_primary_address = 1
+LIMIT 1
+""", company.name, as_dict=True) -%}
+{%- set company_address = company_addreses[0] if company_addreses else None -%}
+
+
+
+{%- set customer_address = frappe.get_doc("Address", doc.customer_address) if doc.customer_address else None -%}
+{%- set letterhead_query = frappe.db.sql("SELECT image FROM `tabLetter Head` WHERE is_default = 1 LIMIT 1",
+as_dict=True) -%}
+{%- set letterhead_img = letterhead_query[0].image if letterhead_query else None -%}
+<meta name="pdfkit-orientation" content="Landscape" />
+
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<style>
+    *,
+    *::before,
+    *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
+
+    body {
+        font-family: "Calibri", Arial, sans-serif;
+        font-size: 11px;
+        color: #111;
+        background: #fff;
+        font-weight: 300;
+    }
+
+    /* =====================================================================
+       PAGE SETUP  (Chrome / Puppeteer / wkhtmltopdf pick these up)
+    ===================================================================== */
+    @page {
+        size: A4 landscape;
+        margin: 5mm 10mm;
+        counter-increment: page;
+
+        @bottom-right {
+            content: "Page " counter(page) " of " counter(pages);
+            font-size: 10px;
+            color: #555;
+            font-family: inherit;
+        }
+
+        @bottom-center {
+            content: "This is a computer generated document.";
+            font-size: 9px;
+            color: #888;
+            font-family: inherit;
+        }
+
+        @bottom-left {
+            content: "";
+            font-size: 9px;
+            color: #888;
+            font-family: inherit;
+        }
+    }
+
+    /* On the LAST page, hide the "continued" note */
+    @page :last {
+        @bottom-left {
+            content: "";
+        }
+    }
+
+    .items-table td {
+        padding: 2px 6px !important;
+        font-size: 11px !important;
+    }
+
+    .items-table th {
+        padding: 4px 6px !important;
+        font-size: 11px !important;
+    }
+
+    .tax-break-up td {
+        padding: 4px 2px !important;
+        font-size: 10px !important;
+    }
+
+    .tax-break-up th {
+        padding: 2px !important;
+        font-size: 10px !important;
+    }
+
+    .tax-break-up table {
+        width: 100% !important;
+        margin: 0 !important;
+    }
+
+    .ql-editor {
+        line-height: 1.1 !important;
+    }
+
+    /* =====================================================================
+       REPEATING HEADER  –  appears at top of every page
+    ===================================================================== */
+    .invoice-header-wrapper {
+        display: table-header-group;
+        /* makes it repeat on every printed page */
+    }
+
+    .print-format-preview {
+        padding: 0 !important;
+        margin: 10px 10px !important;
+    }
+
+    div.print-preview {
+        max-width: 11.69in !important;
+        max-height: 8.3in !important;
+    }
+
+    .invoice-header {
+        display: table;
+        width: 100%;
+        border-collapse: collapse;
+        border: 0.5px solid #D1D8DD;
+        margin-bottom: 0;
+        table-layout: fixed;
+    }
+
+    .invoice-header td {
+        width: 50%;
+        vertical-align: top;
+        padding: 2px !important;
+    }
+
+    .invoice-header .col-seller {
+        border-right: 0.5px solid #D1D8DD;
+    }
+
+    /* Seller column */
+    .company-name {
+        font-size: 16px;
+        font-weight: 700;
+        margin-bottom: 3px;
+        line-height: 1.2;
+    }
+
+    .company-logo {
+        max-height: 50px;
+        max-width: 100%;
+        margin-bottom: 5px;
+        display: block;
+        margin-left: auto;
+    }
+
+
+    .company-detail {
+        font-size: 11px;
+        color: #222;
+    }
+
+
+    .inv-number {
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    .inv-meta-row {
+        font-size: 11px;
+        color: #222;
+    }
+
+    .inv-meta-label {
+        color: #555;
+        font-weight: 600;
+        min-width: 82px;
+        display: inline-block;
+    }
+
+    .section-divider {
+        border: none;
+        border-top: 1px solid #D1D8DD;
+        margin: 7px 0;
+    }
+
+    .buyer-heading {
+        font-size: 11px;
+        font-weight: 700;
+        margin-bottom: 3px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .buyer-detail {
+        font-size: 11px;
+        line-height: 1.2;
+        color: #222;
+        padding: 2px !important;
+    }
+
+    .buyer-name {
+        font-weight: 700;
+        font-size: 12px;
+    }
+
+    /* =====================================================================
+       ITEMS TABLE  (inside the repeating-table body)
+    ===================================================================== */
+    .invoice-body {
+        display: table;
+        width: 100%;
+        border-collapse: collapse;
+        border-left: 1px solid #D1D8DD;
+        border-right: 1px solid #D1D8DD;
+        border-bottom: 1px solid #D1D8DD;
+    }
+
+    .items-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .items-table thead tr {
+        background-color: #f0f0f0;
+    }
+
+    .items-table th,
+    .items-table td {
+        border: 0.5px solid #D1D8DD;
+        vertical-align: top;
+        white-space: nowrap;
+        width: 1px;
+    }
+
+    .items-table th {
+        font-weight: 700;
+        font-size: 10px;
+        text-align: center;
+        background: #e8e8e8;
+        border: 0.5px solid #D1D8DD;
+        vertical-align: bottom;
+    }
+
+    .items-table .col-desc {
+        width: auto !important;
+        white-space: normal !important;
+    }
+
+    .items-table td.text-right {
+        text-align: right;
+    }
+
+    .items-table td.text-center {
+        text-align: center;
+    }
+
+    .items-table td.col-hsn {
+        text-align: right;
+    }
+
+    .items-table td.col-qty {
+        text-align: right;
+    }
+
+    .items-table td.col-unit {
+        text-align: center;
+    }
+
+    .items-table td.col-rate {
+        text-align: right;
+    }
+
+    .items-table td.col-disc {
+        text-align: right;
+    }
+
+    .items-table td.col-tax {
+        text-align: center;
+    }
+
+    .items-table td.col-amt {
+        text-align: right;
+    }
+
+    /* Summary / Totals section */
+    .totals-section {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .totals-section td {
+        padding: 1px 3px;
+        font-size: 11px;
+        border-bottom: 0.5px solid #D1D8DD;
+    }
+
+    .totals-section .lbl {
+        color: #555;
+    }
+
+    .totals-section .val {
+        text-align: right;
+        font-weight: 600;
+    }
+
+    .totals-section .grand-total td {
+        font-weight: 700;
+        font-size: 13px;
+        border-top: 1px solid #D1D8DD;
+        border-bottom: 1px solid #D1D8DD;
+    }
+
+    /* =====================================================================
+       PAGE-BREAK FOOTER  – "Continued on page N"
+       Chrome prints  @bottom-center  content on every page via CSS counters.
+    ===================================================================== */
+    /* We use a CSS-only trick: a thin element with page counter at bottom */
+    .page-info {
+        position: running(pageInfo);
+        text-align: center;
+        font-size: 8pt;
+        color: #555;
+    }
+
+    /* Utility */
+    .w-100 {
+        width: 100%;
+    }
+
+    .mt-4 {
+        margin-top: 4px;
+    }
+
+    /* =====================================================================
+       "Continued on next page" footer trick for Chrome
+       We inject a <div> that only shows when a page is NOT the last.
+       Chrome/Puppeteer doesn't support the CSS named-string trick cleanly,
+       so we rely on repeating-group approach combined with a footer note
+       rendered at each page bottom via @page bottom-right.
+    ===================================================================== */
+    .page-footer-running {
+        position: running(footerContent);
+        font-size: 8pt;
+        color: #555;
+        text-align: right;
+    }
+
+    /* =====================================================================
+       Signature / footer strip at absolute bottom of last page
+    ===================================================================== */
+    .final-footer {
+        margin-top: 2px;
+        border-top: 1px solid #D1D8DD;
+        padding-top: 2px;
+        font-size: 8.5pt;
+        color: #444;
+        display: flex;
+        justify-content: space-between;
+    }
+
+    .final-footer .auth-sign {
+        text-align: right;
+        margin-top: 6px;
+        font-size: 8.5pt;
+    }
+
+    /* Prevent orphan rows */
+    .items-table tr {
+        page-break-inside: avoid;
+    }
+</style>
+
+<body>
+
+    <table style="width:100%; border-collapse:collapse; display:table;">
+        <thead>
+            <tr>
+                <td style="padding-bottom: 0 !important;;">
+                    <div
+                        style="text-align: center; font-size: 16px; font-weight: bold; margin-bottom: 5px; text-transform: uppercase;">
+                        Tax Invoice</div>
+                    <div style="border-bottom: 1px solid #D1D8DD;"></div>
+                    <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                        <tr>
+                            <!-- Column 1: Logo -->
+                            <td style="width: 22%%; padding: 4px; vertical-align: top; text-align: left;">
+                                {%- if letterhead_img -%}
+                                <img src="{{ letterhead_img }}" class="company-logo"
+                                    style="max-height: 35px; width: auto !important; margin-left: 0; display: block; margin-bottom: 8px;"
+                                    alt="Logo">
+                                {%- endif -%}
+                                <div class="company-detail" style="font-size: 10px; line-height: 1.2; color: #222;">
+                                    {%- if company_address.email_id %}<strong>Email:</strong> {{
+                                    company_address.email_id }}<br>{%- endif -%}
+                                    {%- if company_address.phone %}<strong>Phone:</strong> {{ company_address.phone
+                                    }}{%- endif -%}
+                                </div>
+                            </td>
+
+                            <!-- Column 2: Seller Details -->
+                            <td style="width: 30%; padding: 4px; vertical-align: top;">
+                                <div
+                                    style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: #555; margin-bottom: 2px;">
+                                    Seller:</div>
+                                <div class="company-name"
+                                    style="font-size: 13px; font-weight: 700; color: #111; line-height: 1.1;">{{
+                                    doc.company }}</div>
+                                <div class="company-detail" style="font-size: 10px; line-height: 1.2; color: #222;">
+                                    {%- if company_address -%}
+                                    {{ company_address.address_line1 or "" }}{%- if company_address.address_line2 %}, {{
+                                    company_address.address_line2 }}{%- endif -%},
+                                    {{ company_address.city or "" }}{%- if company_address.pincode %} - {{
+                                    company_address.pincode }}{%- endif -%}, {{ company_address.state or "" }}<br>
+                                    {%- if company_address.gstin %}<strong>GSTIN:</strong> {{ company_address.gstin
+                                    }}<br>{%- endif -%}
+                                    {%- if company.tax_id %}<strong>PAN:</strong> {{ company.tax_id }}<br>{%- elif
+                                    company.pan %}<strong>PAN:</strong> {{ company.pan }}<br>{%- endif -%}
+                                    {%- endif -%}
+                                </div>
+                            </td>
+
+                            <!-- Column 3: Recipient Details -->
+                            <td style="width: 25%; padding: 4px; vertical-align: top;">
+                                <div
+                                    style="font-size: 10px; font-weight: 700; text-transform: uppercase; color: #555; margin-bottom: 2px;">
+                                    Recipient:</div>
+                                <div class="buyer-detail" style="font-size: 10px; line-height: 1.2; color: #222;">
+                                    <div class="buyer-name"
+                                        style="font-weight: 700; font-size: 13px; margin-bottom: 2px;">{{
+                                        doc.customer_name or doc.customer }}</div>
+                                    {%- if customer_address -%}
+                                    {{ customer_address.address_line1 or "" }}{%- if customer_address.address_line2 %},
+                                    {{ customer_address.address_line2 }}{%- endif -%}<br>
+                                    {{ customer_address.city or "" }}{%- if customer_address.pincode %} - {{
+                                    customer_address.pincode }}{%- endif -%}, {{ customer_address.state or "" }}
+                                    {%- if customer_address.gst_state_number %}({{ customer_address.gst_state_number
+                                    }}){%- endif %}<br>
+                                    {%- endif -%}
+                                    {%- if doc.get("billing_address_gstin") %}<strong>GSTIN/UIN:</strong> {{
+                                    doc.billing_address_gstin }}<br>
+                                    {%- elif customer_address and customer_address.get("gstin")
+                                    %}<strong>GSTIN:</strong> {{ customer_address.gstin }}<br>{%- endif -%}
+                                </div>
+                            </td>
+
+                            <!-- Column 4: Combined Meta Details -->
+                            <td style="width: 23%; padding: 4px; vertical-align: top;">
+                                <div class="inv-meta-row"
+                                    style="display: flex; margin-bottom: 1px; font-size: 10px; line-height: 1.05;">
+                                    <span style="width: 75px; color: #555; font-weight: 600;">Invoice No</span>
+                                    <span style="margin-right: 4px;">:</span>
+                                    <strong style="flex: 1; color: #111; font-size: 11px;">{{ doc.name }}</strong>
+                                </div>
+                                <div class="inv-meta-row"
+                                    style="display: flex; margin-bottom: 1px; font-size: 10px; line-height: 1.05;">
+                                    <span style="width: 75px; color: #555; font-weight: 600;">Date</span>
+                                    <span style="margin-right: 4px;">:</span>
+                                    <span style="flex: 1; color: #111;">{{ frappe.utils.formatdate(doc.posting_date, "dd
+                                        MMM yyyy") }}</span>
+                                </div>
+                                <div class="inv-meta-row"
+                                    style="display: flex; margin-bottom: 1px; font-size: 10px; line-height: 1.05;">
+                                    <span style="width: 75px; color: #555; font-weight: 600;">Due Date</span>
+                                    <span style="margin-right: 4px;">:</span>
+                                    <span style="flex: 1; color: #111;">{{ frappe.utils.formatdate(doc.due_date, "dd MMM
+                                        yyyy") if doc.due_date else "&mdash;" }}</span>
+                                </div>
+                                {%- if doc.get("ewaybill") %}
+                                <div class="inv-meta-row"
+                                    style="display: flex; margin-bottom: 1px; font-size: 10px; line-height: 1.05;">
+                                    <span style="width: 75px; color: #555; font-weight: 600;">e-Way Bill</span>
+                                    <span style="margin-right: 4px;">:</span>
+                                    <span style="flex: 1; color: #111;">{{ doc.ewaybill }}</span>
+                                </div>
+                                {%- endif %}
+                                <div class="inv-meta-row"
+                                    style="display: flex; margin-bottom: 1px; font-size: 10px; line-height: 1.05;">
+                                    <span style="width: 75px; color: #555; font-weight: 600;">MSO Name</span>
+                                    <span style="margin-right: 4px;">:</span>
+                                    <span style="flex: 1; color: #111;">{{ doc.get("mso_name") or "&mdash;" }}</span>
+                                </div>
+                                <div class="inv-meta-row"
+                                    style="display: flex; margin-bottom: 1px; font-size: 10px; line-height: 1.05;">
+                                    <span style="width: 75px; color: #555; font-weight: 600;">Order Ref</span>
+                                    <span style="margin-right: 4px;">:</span>
+                                    <span style="flex: 1; color: #111;">{{ doc.get("po_no") or "&mdash;" }}</span>
+                                </div>
+                                <div class="inv-meta-row"
+                                    style="display: flex; margin-bottom: 1px; font-size: 10px; line-height: 1.05;">
+                                    <span style="width: 75px; color: #555; font-weight: 600;">Buyer Type</span>
+                                    <span style="margin-right: 4px;">:</span>
+                                    <span style="flex: 1; color: #111;">{{ doc.get("customer_type") or "&mdash;"
+                                        }}</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+
+                </td>
+            </tr>
+        </thead>
+        {%- set gst_totals = {"igst": 0, "cgst": 0, "sgst": 0, } -%}
+        {%- for item in doc.items -%}
+        {%- if item.is_free_item == 0 -%}
+        {%- if item.igst_amount != 0 -%}
+        {%- set _ = gst_totals.update({"igst": 1}) -%}
+        {%- endif -%}
+        {%- if item.cgst_amount != 0 -%}
+        {%- set _ = gst_totals.update({"cgst": 1}) -%}
+        {%- endif -%}
+        {%- if item.sgst_amount != 0 -%}
+        {%- set _ = gst_totals.update({"sgst": 1}) -%}
+        {%- endif -%}
+        {%- endif -%}
+        {%- endfor -%}
+
+        {%- set item_batches_raw = frappe.db.sql("""
+        select
+        sii.name as name,
+        sii.item_code as item,
+        coalesce(if(sii.batch_no='', NULL, sii.batch_no), sbe.batch_no) as batch_no,
+        bat.custom_mfg_batch as mfg_batch,
+        DATE_FORMAT(bat.expiry_date, '%%b-%%y') as expiry_date,
+        coalesce(sbe.qty * -1, if(sii.qty='', NULL, sii.qty)) as qty_raw,
+        CASE
+        WHEN MOD(coalesce(sbe.qty * -1, if(sii.qty='', NULL, sii.qty)), 1) = 0
+        THEN FORMAT(coalesce(sbe.qty * -1, if(sii.qty='', NULL, sii.qty)), 0)
+        ELSE
+        TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM
+        coalesce(sbe.qty * -1, if(sii.qty='', NULL, sii.qty))
+        ))
+        END as qty
+        from `tabSales Invoice Item` sii
+        left join `tabSerial and Batch Entry` sbe on sii.serial_and_batch_bundle = sbe.parent
+        left join `tabBatch` bat on bat.name = coalesce(if(sii.batch_no='', NULL, sii.batch_no), sbe.batch_no)
+        where sii.parent = %s
+        """, doc.name, as_dict=True) -%}
+
+        {%- set item_batches = {} -%}
+        {%- for row in item_batches_raw -%}
+        {%- if row.name not in item_batches -%}
+        {%- set _ = item_batches.update({row.name: []}) -%}
+        {%- endif -%}
+        {%- set _ = item_batches[row.name].append(row) -%}
+        {%- endfor -%}
+
+
+        {%- set item_pack_size_raw = frappe.db.sql("""
+        select
+        sii.name as name,
+        itm.pack_size as pack_size
+        from `tabSales Invoice Item` sii
+        left join `tabItem` itm on itm.name = sii.item_code
+        where sii.parent = %s
+        """, doc.name, as_dict=True) -%}
+
+        {%- set item_pack_size = {} -%}
+        {%- for row in item_pack_size_raw -%}
+        {%- set _ = item_pack_size.update({row.name: row.pack_size}) -%}
+        {%- endfor -%}
+
+        <tbody>
+            <tr>
+                <td style="padding-top:0 !important;">
+
+                    <table class="items-table w-100" style="border-top: none;">
+                        <thead>
+                            <tr>
+                                <th rowspan="2" style="width:12px;">#</th>
+                                <th rowspan="2" class="col-desc">Description of Goods</th>
+                                <th rowspan="2" class="col-tax">Pack Size</th>
+                                <th colspan="2" class="col-tax">Batch</th>
+                                <th rowspan="2" class="col-tax">*T</th>
+                                <th rowspan="2" class="col-hsn">HSN/<br>SAC</th>
+                                <th rowspan="2" class="col-rate">MRP</th>
+                                <th rowspan="2" class="col-qty">Qty</th>
+                                <th rowspan="2" class="col-disc">Disc<br>%</th>
+                                <th rowspan="2" class="col-rate">Rate</th>
+                                <th rowspan="2" class="col-amt">Amount</th>
+                                {% if gst_totals.igst %}<th colspan="2" class="col-tax">IGST</th>{% endif %}
+                                {% if gst_totals.cgst %}<th colspan="2" class="col-tax">CGST</th>{% endif %}
+                                {% if gst_totals.sgst %}<th colspan="2" class="col-tax">SGST</th>{% endif %}
+                                <th rowspan="2" class="col-amt">Total</th>
+                            </tr>
+                            <tr>
+                                <th class="col-tax">#</th>
+                                <th class="col-tax">Exp</th>
+                                {% if gst_totals.igst %}<th class="col-tax">%</th>{% endif %}
+                                {% if gst_totals.igst %}<th class="col-tax">Amt</th>{% endif %}
+                                {% if gst_totals.cgst %}<th class="col-tax">%</th>{% endif %}
+                                {% if gst_totals.cgst %}<th class="col-tax">Amt</th>{% endif %}
+                                {% if gst_totals.sgst %}<th class="col-tax">%</th>{% endif %}
+                                {% if gst_totals.sgst %}<th class="col-tax">Amt</th>{% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {%- for item in doc.items[1:]*8 -%}
+                            <tr>
+                                <td class="text-center">{{ loop.index }}</td>
+                                <td class="col-desc">
+                                    <strong>{{ item.item_name or item.item_code }}</strong>
+                                    {%- if item.description and item.description != item.item_name %}
+                                    <br><span style="color:#555; font-size:10px;">{{ item.description }}</span>
+                                    {%- endif %}
+                                </td>
+                                <td class="col-desc">
+                                    {% if item_pack_size.get(item.name) %}
+                                    {{ item_pack_size.get(item.name)|replace(" ", "&nbsp;") }}
+                                    {% endif %}
+                                </td>
+                                <td class="col-tax text-left">
+                                    {%- if item_batches.get(item.name) -%}
+                                    {%- for b in item_batches[item.name] -%}
+                                    {{ b.mfg_batch or b.batch_no or "" }}
+                                    {%- if not loop.last %}<br>{% endif %}
+                                    {%- endfor -%}
+                                    {%- else -%}
+                                    {{ item.batch_no }}
+                                    {%- endif -%}
+                                </td>
+                                {# <td class="col-tax text-left">
+                                    {%- if item_batches.get(item.name) -%}
+                                    {%- for b in item_batches[item.name] -%}
+                                    {{ b.qty or "" }}
+                                    {%- if not loop.last %}<br>{% endif %}
+                                    {%- endfor -%}
+                                    {%- else -%}
+                                    {{ item.qty }}
+                                    {%- endif -%}
+                                </td> #}
+                                <td class="col-tax text-left">
+                                    {%- if item_batches.get(item.name) -%}
+                                    {%- for b in item_batches[item.name] -%}
+                                    {{ b.expiry_date or "&mdash;" }}
+                                    {%- if not loop.last %}<br>{% endif %}
+                                    {%- endfor -%}
+                                    {%- else -%}
+                                    {{ item.expiry_date }}
+                                    {%- endif -%}
+                                </td>
+                                <td class="col-tax text-right">
+                                    {% if item.get("gst_treatment") == 'Taxable' %}
+                                    T
+                                    {% else %}
+                                    N
+                                    {% endif %}
+                                </td>
+                                <td class="col-hsn">{{ item.gst_hsn_code or "&mdash;" }}</td>
+                                <td class="col-rate">{{ "%.2f"|format(item.price_list_rate) }}</td>
+                                <td class="col-qty">{{ item.qty }} {{ item.uom }}</td>
+                                <td class="col-disc">
+                                    {%- if item.discount_percentage %}{{ "%.1f"|format(item.discount_percentage) }}{%-
+                                    else %}&mdash;{%-
+                                    endif %}
+                                </td>
+                                <td class="col-rate">{{ "%.2f"|format(item.rate) }}</td>
+                                <td class="col-amt text-right">{{ "%.2f"|format(item.amount) }}</td>
+                                {% if gst_totals.igst %}
+                                <td class="col-tax text-right">
+                                    {{ "%.1f"|format(item.get("igst_rate", 0) or item.get("tax_amount", 0) or 0) }}
+                                </td>
+                                <td class="col-amt text-right">
+                                    {{ "%.2f"|format(item.get("igst_amount", 0) or 0) }}
+                                </td>
+                                {% endif %}
+                                {% if gst_totals.cgst %}
+                                <td class="col-tax text-right">
+                                    {{ "%.1f"|format(item.get("cgst_rate", 0) or item.get("tax_amount", 0) or 0) }}
+                                </td>
+                                <td class="col-amt text-right">
+                                    {{ "%.2f"|format(item.get("cgst_amount", 0) or 0) }}
+                                </td>
+                                {% endif %}
+                                {% if gst_totals.sgst %}
+                                <td class="col-tax text-right">
+                                    {{ "%.1f"|format(item.get("sgst_rate", 0) or item.get("tax_amount", 0) or 0) }}
+                                </td>
+                                <td class="col-amt text-right">
+                                    {{ "%.2f"|format(item.get("sgst_amount", 0) or 0) }}
+                                </td>
+                                {% endif %}
+                                <td class="col-amt text-right">
+                                    {{ "%.2f"|format(item.amount + (item.get("sgst_amount", 0) + item.get("cgst_amount",
+                                    0) + item.get("igst_amount", 0) or 0)) }}
+                                </td>
+
+                            </tr>
+                            {%- endfor -%}
+                        </tbody>
+                        <tfoot>
+                            <tr style="font-weight: bold;">
+                                <td></td>
+                                <td colspan=5>*T: Tax Type T:Taxable E:Exempted N:Nil Rated NG:Non GST </td>
+                                <td></td>
+                                <td></td>
+                                <td></td>
+                                <td></td>
+                                <td></td>
+                                <td>{{ "%.2f"|format(doc.total or 0) }}</td>
+                                {% if gst_totals.igst %}
+                                <td class="col-amt text-right" colspan="2">
+                                    {%- for tax in doc.taxes -%}
+                                    {% if "igst" in tax.description|lower %}
+                                    {{ "%.2f"|format(tax.tax_amount or 0) }}
+                                    {% endif %}
+                                    {% endfor %}
+                                </td>
+                                {% endif %}
+                                {% if gst_totals.cgst %}
+                                <td class="col-amt text-right" colspan="2">
+                                    {%- for tax in doc.taxes -%}
+                                    {% if "cgst" in tax.description|lower %}
+                                    {{ "%.2f"|format(tax.tax_amount or 0) }}
+                                    {% endif %}
+                                    {% endfor %}
+                                </td>
+                                {% endif %}
+                                {% if gst_totals.sgst %}
+                                <td class="col-amt text-right" colspan="2">
+                                    {%- for tax in doc.taxes -%}
+                                    {% if "sgst" in tax.description|lower %}
+                                    {{ "%.2f"|format(tax.tax_amount or 0) }}
+                                    {% endif %}
+                                    {% endfor %}
+                                </td>
+                                {% endif %}
+                                <td class="col-amt text-right">
+                                    {{ "%.2f"|format(doc.grand_total) }}
+                                </td>
+
+                            </tr>
+                        </tfoot>
+                    </table>
+
+                    {# ---- 3-Column Footer Section ------------------------------------ #}
+                    <table style="width:100%; border-collapse:collapse; margin-top:5px;">
+                        <tr>
+                            <!-- Column 1: Bank Details -->
+                            <td
+                                style="width:30%; vertical-align:top; font-size:11px; padding:2px; padding-top: 0 !important; padding-bottom: 0 !important;">
+                                <strong>Bank Details</strong><br>
+                                Bank: KOTAK MAHINDRA BANK LIMITED<br>
+                                A/C no: 6147339928<br>
+                                IFSC: KKBK0000957
+                            </td>
+
+                            <!-- Column 2: HSN Summary -->
+                            <td
+                                style="width:40%; vertical-align:top; font-size:10px; padding:2px; padding-top: 0 !important; padding-bottom: 0 !important;">
+                                {{ doc.gst_breakup_table|replace('Amount', "Amt.") }}
+                            </td>
+
+                            <!-- Column 3: Totals -->
+                            <td
+                                style="width:30%; vertical-align:top; font-size:11px; padding:2px; padding-top: 0 !important; padding-bottom: 0 !important;">
+                                <table style="width:100%; border-collapse:collapse;">
+                                    <tr>
+                                        <td style="padding: 0 !important;">Amount Before Tax</td>
+                                        <td style="text-align:right; padding: 0 !important;"> ₹{{
+                                            "%.2f"|format(doc.total or 0) }}
+                                        </td>
+                                    </tr>
+                                    {%- for tax in doc.taxes -%}
+                                    {%- if "cgst" in tax.description|lower -%}
+                                    <tr>
+                                        <td style="padding: 0 !important;">Add: CGST</td>
+                                        <td style="text-align:right; padding: 0 !important;"> ₹{{
+                                            "%.2f"|format(tax.tax_amount or
+                                            0) }}</td>
+                                    </tr>
+                                    {%- elif "sgst" in tax.description|lower -%}
+                                    <tr>
+                                        <td style="padding: 0 !important;">Add: SGST</td>
+                                        <td style="text-align:right; padding: 0 !important;"> ₹{{
+                                            "%.2f"|format(tax.tax_amount or
+                                            0) }}</td>
+                                    </tr>
+                                    {%- elif "igst" in tax.description|lower -%}
+                                    <tr>
+                                        <td style="padding: 0 !important;">Add: IGST</td>
+                                        <td style="text-align:right; padding: 0 !important;"> ₹ {{
+                                            "%.2f"|format(tax.tax_amount or
+                                            0) }}</td>
+                                    </tr>
+                                    {%- endif -%}
+                                    {%- endfor -%}
+                                    <tr>
+                                        <td style="padding: 0 !important;">Amount After Tax</td>
+                                        <td style="text-align:right; padding: 0 !important;"> ₹{{
+                                            "%.2f"|format(doc.grand_total or
+                                            0) }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 0 !important;">Round Oﬀ</td>
+                                        <td style="text-align:right; padding: 0 !important;"> ₹{{
+                                            "%.2f"|format((doc.rounded_total
+                                            or doc.grand_total) - (doc.grand_total or 0)) }}</td>
+                                    </tr>
+                                    <tr style="font-weight:bold;">
+                                        <td style="padding: 0 !important; font-size:13px;">Net Payable INR</td>
+                                        <td style="text-align:right; padding: 0 !important; font-size:13px;"> ₹{{
+                                            "%.2f"|format(doc.rounded_total
+                                            or doc.grand_total or 0) }}</td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                    </table>
+
+                    {# ---- Net Payable In Words --------------------------------------- #}
+                    <div style="border-top:1px solid #D1D8DD; border-bottom:1px solid #D1D8DD; font-size:11px;">
+                        <strong>Net Payable In Words:</strong> {{ doc.in_words }}
+                    </div>
+
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 5px;">
+                        <tr>
+                            <td
+                                style="width: 80%; vertical-align: top; font-size: 9px; color: #333; padding-right: 15px; line-height: 1;">
+                                {%- if doc.terms %}
+                                <strong style="font-size: 10px;">Terms &amp; Conditions:</strong><br>
+                                {{ doc.terms }}
+                                {%- endif %}
+                            </td>
+                            <td
+                                style="width: 20%; text-align: right; vertical-align: top; font-size: 11px; padding-bottom: 0 !important;">
+                                <strong>For&nbsp;{{ doc.company | replace(' ', '&nbsp;') }}</strong><br>
+                            </td>
+                        </tr>
+                    </table>
+                    <table style="width: 100%; border-collapse: collapse; border-bottom: 1px solid #D1D8DD;">
+                        <tr>
+                            <td
+                                style="width: 33.34%; vertical-align: bottom; text-align: left; font-size: 12px; color: #333; padding: 0 !important;">
+                                <span>E & O.E</span>
+                            </td>
+                            <td
+                                style="width: 33.33%; vertical-align: bottom; text-align: center; font-size: 12px; color: #333; padding: 0 !important;">
+                                <span>Prepared By: {{ doc.owner }}</span>
+                            </td>
+                            <td
+                                style="width: 33.33%; vertical-align: bottom; text-align: right; font-size: 12px; color: #333; padding: 0 !important;">
+                                <span>Authorized Signatory</span>
+                            </td>
+                        </tr>
+                    </table>
+
+                </td>
+            </tr>
+        </tbody>
+        {# ---- END BODY -------------------------------------------------------- #}
+
+    </table>
+
+</body>
+
+</html>

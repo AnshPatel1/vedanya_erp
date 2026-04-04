@@ -258,15 +258,12 @@ fixtures = [
         "dt": "Custom Field",
         "filters": [
             [
-                "name",
+                "module",
                 "in",
                 [
-                    "Address-custom_default_billing_branch",
-                    "Batch-custom_mfg_batch",
-                    "Batch-custom_show_stock_balances",
+                    "Vedanya"
                 ],
             ]
         ],
     },
 ]
-
